@@ -53,12 +53,9 @@ struct simple_repeat_t {
 
     simple_repeat_t() {}
     simple_repeat_t(std::string& line) {
-        char temp[100];
         std::stringstream ss(line);
 
-        ss >> temp;
         ss >> chr >> start >> end;
-        ss >> temp;
         ss >> period;
     }
 };
