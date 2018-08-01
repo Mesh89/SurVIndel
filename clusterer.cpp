@@ -25,7 +25,7 @@ config_t config;
 std::ofstream predictions_writer;
 
 
-void clusterize(int id, int contig_id, int contig2_id, disc_type_t dt, std::string& fname, bool open_bam) {
+void clusterize(int id, int contig_id, int contig2_id, disc_type_t dt, std::string& fname) {
     mtx.lock();
     std::cout << "Clustering " << fname << std::endl;
     mtx.unlock();
@@ -35,8 +35,7 @@ void clusterize(int id, int contig_id, int contig2_id, disc_type_t dt, std::stri
 
     std::vector<cluster_t*> clusters;
 
-    samFile* bam_file = NULL;
-    if (open_bam) bam_file = sam_open(bam_fname.c_str(), "r");
+    samFile* bam_file = sam_open(bam_fname.c_str(), "r");
     if (bam_file != NULL) {
         int code = sam_index_build(bam_fname.c_str(), 0);
         if (code != 0) {
@@ -65,6 +64,7 @@ void clusterize(int id, int contig_id, int contig2_id, disc_type_t dt, std::stri
 
         bam_destroy1(read);
         hts_itr_destroy(iter);
+        bam_hdr_destroy(header);
         hts_idx_destroy(idx);
 
         sam_close(bam_file);
@@ -107,48 +107,63 @@ void clusterize(int id, int contig_id, int contig2_id, disc_type_t dt, std::stri
         for (auto it = eq_range.first; it != eq_range.second; it++) {
             if (it->second == c) {
                 clusters_map.erase(it);
+                delete c;
                 break;
             }
         }
     }
     to_be_removed.clear();
 
-    std::priority_queue<cc_distance_t> pq;
-    for (cluster_t* c1 : clusters) {
-        auto end = clusters_map.upper_bound(c1->a1.end+config.max_is);
-        for (auto map_it = clusters_map.lower_bound(c1->a1.start); map_it != end; map_it++) {
-            cluster_t* c2 = map_it->second;
-            if (c1 != c2 && cluster_t::can_merge(c1, c2, config) &&
-                (c1->a1.start <= c2->a1.start)) {
-                pq.push(cc_distance_t(cluster_t::distance(c1, c2), c1, c2));
+    std::vector<int> max_dist_v;
+    max_dist_v.push_back(2*config.max_is);
+
+    for (int max_dist : max_dist_v) {
+
+        std::priority_queue<cc_distance_t> pq;
+        for (cluster_t *c1 : clusters) {
+            auto end = clusters_map.upper_bound(c1->a1.end + max_dist);
+            for (auto map_it = clusters_map.lower_bound(c1->a1.start); map_it != end; map_it++) {
+                cluster_t *c2 = map_it->second;
+                if (c1 != c2 && cluster_t::can_merge(c1, c2, config) && cluster_t::distance(c1, c2) <= max_dist &&
+                    (c1->a1.start <= c2->a1.start)) {
+                    pq.push(cc_distance_t(cluster_t::distance(c1, c2), c1, c2));
+                }
             }
         }
-    }
 
-    while (!pq.empty()) {
-        cc_distance_t ccd = pq.top();
-        pq.pop();
+        while (!pq.empty()) {
+            cc_distance_t ccd = pq.top();
+            pq.pop();
 
-        if (ccd.c1->dead | ccd.c2->dead) continue;
+            if (ccd.c1->dead || ccd.c2->dead) continue;
 
-        cluster_t* new_cluster = cluster_t::merge(ccd.c1, ccd.c2);
-        if (new_cluster->dt == DISC_TYPES.LI && // stop if they try to merge into an invalid cluster
-            new_cluster->a2.pos()-new_cluster->a1.pos() < 50) {
-            continue;
-        }
-        clusters.push_back(new_cluster);
-
-        // if memory is a problem, remove elements instead of just marking as dead
-        ccd.c1->dead = true;
-        ccd.c2->dead = true;
-
-        auto end = clusters_map.upper_bound(new_cluster->a1.end+config.max_is);
-        for (auto map_it = clusters_map.lower_bound(new_cluster->a1.start-config.max_is); map_it != end; map_it++) {
-            if (cluster_t::can_merge(new_cluster, map_it->second, config)) {
-                pq.push(cc_distance_t(cluster_t::distance(new_cluster, map_it->second), new_cluster, map_it->second));
+            cluster_t* new_cluster = cluster_t::merge(ccd.c1, ccd.c2);
+            if (new_cluster->dt == DISC_TYPES.LI && // stop if they try to merge into an invalid cluster
+                new_cluster->a2.pos() - new_cluster->a1.pos() < 50) {
+                continue;
             }
+            clusters.push_back(new_cluster);
+
+            // if memory is a problem, remove elements instead of just marking as dead
+            ccd.c1->dead = true;
+            ccd.c2->dead = true;
+
+            auto end = clusters_map.upper_bound(new_cluster->a1.end + max_dist);
+            for (auto map_it = clusters_map.lower_bound(new_cluster->a1.start - max_dist); map_it != end; map_it++) {
+                if (!map_it->second->dead && cluster_t::can_merge(new_cluster, map_it->second, config) &&
+                    cluster_t::distance(new_cluster, map_it->second) <= max_dist) {
+                    pq.push(cc_distance_t(cluster_t::distance(new_cluster, map_it->second), new_cluster,
+                                          map_it->second));
+                }
+            }
+            clusters_map.insert(std::make_pair(new_cluster->a1.start, new_cluster));
         }
-        clusters_map.insert(std::make_pair(new_cluster->a1.start, new_cluster));
+
+//        for (auto it = clusters_map.begin(); it != clusters_map.end(); it++) {
+//            if (it->second->dead) {
+//                clusters_map.erase(it);
+//            }
+//        }
     }
 
     mtx.lock();
@@ -157,6 +172,7 @@ void clusterize(int id, int contig_id, int contig2_id, disc_type_t dt, std::stri
             prediction_t prediction(c, dt);
             predictions_writer << prediction.to_str() << "\n";
         }
+        delete c;
     }
     mtx.unlock();
 }
@@ -196,7 +212,7 @@ int main(int argc, char* argv[]) {
     for (contig_id = 1; contig_id < contig_id2name.size(); contig_id++) {
         for (disc_type_t dt = 1; dt <= DISC_TYPES.n_types; dt++) {
             std::string fname = std::to_string(contig_id) + "-" + dt_to_str(dt);
-            std::future<void> future = thread_pool.push(clusterize, contig_id, contig_id, dt, fname, true);
+            std::future<void> future = thread_pool.push(clusterize, contig_id, contig_id, dt, fname);
             futures.push_back(std::move(future));
         }
     }
