@@ -115,13 +115,16 @@ void clusterize(int id, int contig_id, int contig2_id, disc_type_t dt, std::stri
     to_be_removed.clear();
 
     std::vector<int> max_dist_v;
+    for (int i = -198; i <= 0; i++) {
+        max_dist_v.push_back(i);
+    }
     max_dist_v.push_back(2*config.max_is);
 
     for (int max_dist : max_dist_v) {
 
         std::priority_queue<cc_distance_t> pq;
-        for (cluster_t *c1 : clusters) {
-            auto end = clusters_map.upper_bound(c1->a1.end + max_dist);
+        for (cluster_t* c1 : clusters) {
+            auto end = clusters_map.upper_bound(c1->a1.end + 2*config.max_is);
             for (auto map_it = clusters_map.lower_bound(c1->a1.start); map_it != end; map_it++) {
                 cluster_t *c2 = map_it->second;
                 if (c1 != c2 && cluster_t::can_merge(c1, c2, config) && cluster_t::distance(c1, c2) <= max_dist &&
@@ -148,7 +151,7 @@ void clusterize(int id, int contig_id, int contig2_id, disc_type_t dt, std::stri
             ccd.c1->dead = true;
             ccd.c2->dead = true;
 
-            auto end = clusters_map.upper_bound(new_cluster->a1.end + max_dist);
+            auto end = clusters_map.upper_bound(new_cluster->a1.end + 2*config.max_is);
             for (auto map_it = clusters_map.lower_bound(new_cluster->a1.start - max_dist); map_it != end; map_it++) {
                 if (!map_it->second->dead && cluster_t::can_merge(new_cluster, map_it->second, config) &&
                     cluster_t::distance(new_cluster, map_it->second) <= max_dist) {
@@ -159,11 +162,11 @@ void clusterize(int id, int contig_id, int contig2_id, disc_type_t dt, std::stri
             clusters_map.insert(std::make_pair(new_cluster->a1.start, new_cluster));
         }
 
-//        for (auto it = clusters_map.begin(); it != clusters_map.end(); it++) {
-//            if (it->second->dead) {
-//                clusters_map.erase(it);
-//            }
-//        }
+        for (auto it = clusters_map.begin(); it != clusters_map.end(); it++) {
+            if (it->second->dead) {
+                clusters_map.erase(it);
+            }
+        }
     }
 
     mtx.lock();
