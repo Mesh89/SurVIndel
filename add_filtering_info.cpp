@@ -9,7 +9,6 @@
 #include "config.h"
 #include "cluster.h"
 #include "libs/cptl_stl.h"
-#include "alglib/statistics.h"
 #include "ks-test.h"
 
 std::string workdir;
@@ -28,7 +27,7 @@ std::unordered_map<std::string, int> contig_name2id;
 
 std::queue<open_samFile_t*> bam_pool;
 
-alglib::real_1d_array population_del, population_ins;
+//alglib::real_1d_array population_del, population_ins;
 std::vector<double> population_del_v, population_ins_v;
 double population_del_mean, population_ins_mean;
 
@@ -64,6 +63,14 @@ bool is_stat_testable(prediction_t* pred) {
 
 double mean(std::vector<double>& v) {
     return std::accumulate(v.begin(), v.end(), 0.0) / v.size();
+}
+double variance(std::vector<double>& v, double m = NAN) {
+    if (m == NAN) m = mean(v);
+    double acc = 0;
+    for (double d : v) {
+        acc += (d-m)*(d-m);
+    }
+    return acc/v.size();
 }
 
 bam1_t* add_to_queue(std::deque<bam1_t*>& q, bam1_t* o, int size_limit) {
@@ -243,10 +250,8 @@ void stat_testing(int id, std::string bam_fname, prediction_t* pred) {
                 abs(read->core.isize) < MAX_READ_IS) {
                 if (read->core.isize > 0 && read->core.pos > left_pos-200 && read->core.pos <= left_pos) {
                     sample.push_back((double) read->core.isize);
-//                    std::cout << bam_get_qname(read) << " " << read->core.isize << std::endl;
                 } else if (read->core.isize < 0 && bam_endpos(read) > right_pos && bam_endpos(read) <= right_pos+200) {
                     sample.push_back((double) -read->core.isize);
-//                    std::cout << bam_get_qname(read) << " " << read->core.isize << std::endl;
                 }
             }
         }
@@ -263,14 +268,10 @@ void stat_testing(int id, std::string bam_fname, prediction_t* pred) {
         return;
     }
 
-    alglib::real_1d_array sample_array;
-    sample_array.setcontent(sample.size(), sample.data());
-    double pval, temp1, temp2;
+    double pval;
     if (pred->sv_type == SV_TYPES.DEL) {
-//        alglib::mannwhitneyutest(population_del, population_del.length(), sample_array, sample_array.length(), pval, temp1, temp2);
         pval = ks_test(population_del_v, sample);
     } else if (pred->sv_type == SV_TYPES.INS || pred->sv_type == SV_TYPES.DUP) {
-//        alglib::mannwhitneyutest(population_ins, population_ins.length(), sample_array, sample_array.length(), pval, temp1, temp2);
         pval = ks_test(population_ins_v, sample);
     }
 
@@ -281,19 +282,16 @@ void stat_testing(int id, std::string bam_fname, prediction_t* pred) {
     pred->size = sample_mean - pop_mean;
 
     for (int i = 0; i < sample.size(); i++) sample[i] -= pred->size;
-    sample_array.setcontent(sample.size(), sample.data());
     if (pred->sv_type == SV_TYPES.DEL) {
-//        alglib::mannwhitneyutest(population_del, population_del.length(), sample_array, sample_array.length(), pval, temp1, temp2);
         pval = ks_test(population_del_v, sample);
     } else if (pred->sv_type == SV_TYPES.INS || pred->sv_type == SV_TYPES.DUP) {
-//        alglib::mannwhitneyutest(population_ins, population_ins.length(), sample_array, sample_array.length(), pval, temp1, temp2);
         pred->size = -pred->size;
         pval = ks_test(population_ins_v, sample);
     }
     pred->shift_pval = pval;
 
-    double var = alglib::samplevariance(sample_array);
-    pred->conf_ival = 1.96*sqrt(var/sample_array.length());
+    double var = variance(sample);
+    pred->conf_ival = 1.96*sqrt(var/sample.size());
 }
 
 void find_spanning(breakpoint_t& bp, std::string& bam_fname) {
@@ -390,11 +388,9 @@ int main(int argc, char* argv[]) {
     std::cout << "Repeats loaded" << std::endl;
 
     population_del_v = gen_population_for_dels(bam_fname);
-    population_del.setcontent(population_del_v.size(), population_del_v.data());
     population_del_mean = mean(population_del_v);
 
     population_ins_v = gen_population_for_ins(bam_fname);
-    population_ins.setcontent(population_ins_v.size(), population_ins_v.data());
     population_ins_mean = mean(population_ins_v);
 
     std::cout << "Population built." << std::endl;
