@@ -15,28 +15,32 @@ int support(prediction_t& pred) {
 }
 
 double ptn_score(prediction_t& pred) {
-//    return std::max(double(pred.disc_pairs+pred.bp1.sc_reads)/std::max(pred.bp1.spanning_reads,1),
-//                    double(pred.disc_pairs+pred.bp2.sc_reads)/std::max(pred.bp2.spanning_reads,1));
-    return double(pred.disc_pairs+pred.bp1.sc_reads)/std::max(pred.bp1.spanning_reads,1);
+//    return std::max(double(pred.disc_pairs+pred.bp1.sc_reads)/std::max(pred.bp1.spanning_pairs,1),
+//                    double(pred.disc_pairs+pred.bp2.sc_reads)/std::max(pred.bp2.spanning_pairs,1));
+    return double(pred.disc_pairs+pred.bp1.sc_reads)/std::max(pred.bp1.spanning_pairs, 1);
+}
+double ptn_sc_score(breakpoint_t& bp) {
+    return bp.sc_reads/double(bp.spanning_reads);
 }
 
 std::string formatted_print(prediction_t& pred) {
     char str[10000];
     if (pred.bp1.sc_reads > 0 && pred.sv_type != SV_TYPES.INS) {
-        sprintf(str, "ID=%d BP1=%c:%s:%d BP2=%c:%s:%d %s DISC=%d SC=%d,%d SPANNING=%d,%d PVAL=%lf EST_SIZE=%d SHIFT-PVAL=%lf",
+        sprintf(str, "ID=%d BP1=%c:%s:%d BP2=%c:%s:%d %s DISC=%d SC=%d,%d SPANNING_PAIRS=%d,%d SPANNING_READS=%d,%d PVAL=%lf EST_SIZE=%d SHIFT-PVAL=%lf",
                 pred.id,
                 pred.bp1.dir, contig_id2name[pred.bp1.contig_id].c_str(), pred.bp1.pos(),
                 pred.bp2.dir, contig_id2name[pred.bp2.contig_id].c_str(), pred.bp2.pos(),
                 svt_to_str(pred.sv_type).c_str(), pred.disc_pairs, pred.bp1.sc_reads, pred.bp2.sc_reads,
-                pred.bp1.spanning_reads, pred.bp2.spanning_reads, pred.pval, pred.get_size(), pred.shift_pval);
+                pred.bp1.spanning_pairs, pred.bp2.spanning_pairs, pred.bp1.spanning_reads, pred.bp2.spanning_reads,
+                pred.pval, pred.get_size(), pred.shift_pval);
     } else {
-        sprintf(str, "ID=%d BP1=%c:%s:%d BP2=%c:%s:%d %s DISC=%d SC=%d,%d SPANNING=%d,%d PVAL=%lf EST_SIZE=%d:%d SHIFT-PVAL=%lf",
+        sprintf(str, "ID=%d BP1=%c:%s:%d BP2=%c:%s:%d %s DISC=%d SC=%d,%d SPANNING=%d,%d SPANNING_READS=%d,%d PVAL=%lf EST_SIZE=%d:%d SHIFT-PVAL=%lf",
                 pred.id,
                 pred.bp1.dir, contig_id2name[pred.bp1.contig_id].c_str(), pred.bp1.pos(),
                 pred.bp2.dir, contig_id2name[pred.bp2.contig_id].c_str(), pred.bp2.pos(),
                 svt_to_str(pred.sv_type).c_str(), pred.disc_pairs, pred.bp1.sc_reads, pred.bp2.sc_reads,
-                pred.bp1.spanning_reads, pred.bp2.spanning_reads, pred.pval, pred.size - pred.conf_ival,
-                pred.size + pred.conf_ival, pred.shift_pval);
+                pred.bp1.spanning_pairs, pred.bp2.spanning_pairs, pred.bp1.spanning_reads, pred.bp2.spanning_reads,
+                pred.pval, pred.size - pred.conf_ival, pred.size + pred.conf_ival, pred.shift_pval);
     }
     return str;
 }
@@ -102,33 +106,49 @@ int main(int argc, char* argv[]) {
         }
 
         if (pred.pval < 0) { // odds ratio
-            if (support(pred) >= config.avg_depth/6 && ptn_score(pred) > 0.33) {
+            if (support(pred) >= config.avg_depth/6 && ptn_score(pred) > ptn_ratio) {
                 retained.push_back(pred);
             }
         } else { // stat testing
             // if no rep file was given, then we assume all SV are inside repetitive regions
             bool in_rep = true;
+            bool in_huge_rep = false;
             std::string contig_name = contig_id2name[pred.bp1.contig_id];
             if (repeat_trees[contig_name] != NULL) {
                 in_rep = false;
                 std::vector<Interval<simple_repeat_t> > reps = repeat_trees[contig_name]->findOverlapping(pred.bp1.pos(), pred.bp2.pos());
                 for (Interval<simple_repeat_t> rep : reps) {
-                    if (pred.sv_type != SV_TYPES.DEL ||
-                            overlap(rep.start, rep.stop, pred.bp1.pos(), pred.bp2.pos()) >= config.min_sv_len) {
-                        in_reps_ids.insert(pred.id);
+                    if (pred.sv_type == SV_TYPES.DEL && overlap(rep.start, rep.stop, pred.bp1.pos(), pred.bp2.pos()) >= config.min_sv_len
+                        && rep.start-(config.max_is-pred.bp1.anchor_len()) <= pred.bp1.pos()
+                        && pred.bp2.pos() <= rep.stop+(config.max_is-pred.bp2.anchor_len())) {
                         in_rep = true;
+                    } else if (pred.sv_type == SV_TYPES.INS || pred.sv_type == SV_TYPES.DUP) {
+                        in_rep = true;
+                    }
+
+                    if (in_rep) {
+                        in_reps_ids.insert(pred.id);
                     }
                 }
             }
 
             if (!in_rep && pred.disc_pairs < std::max(3, config.avg_depth/8) && pred.bp1.sc_reads+pred.bp2.sc_reads == 0) continue;
 
+            // we are basically adding the hard-clipped reads
+            int sc_reads1 = pred.bp1.sc_reads;
+            int sc_reads2 = pred.bp2.sc_reads;
+            if (pred.bp1.sc_reads > 1) sc_reads2 += pred.bp1.sc_reads;
+            if (pred.bp2.sc_reads > 1) sc_reads1 += pred.bp2.sc_reads;
+            pred.bp1.sc_reads = sc_reads1;
+            pred.bp2.sc_reads = sc_reads2;
+
             // if it's a deletion and it has enough SC support, accept automatically
             // it seems for insertions SC support is not so reliable, so only accept if in unique region
             int min_disc = (pred.sv_type == SV_TYPES.DEL || pred.sv_type == SV_TYPES.INS || pred.sv_type == SV_TYPES.NOV)
                            && pred.len() < 100 ? 0 : 1;
-            if ((pred.sv_type == SV_TYPES.DEL || !in_rep) && pred.disc_pairs >= min_disc
-                && pred.bp1.sc_reads >= 5 && pred.bp2.sc_reads >= 5) {
+            if (ptn_sc_score(pred.bp1) > ptn_ratio/2 && ptn_sc_score(pred.bp2) > ptn_ratio/2 &&
+//                    (pred.sv_type == SV_TYPES.DEL || !in_rep) && pred.disc_pairs >= min_disc &&
+                    pred.bp1.sc_reads >= 5 && pred.bp2.sc_reads >= 5) {
                 retained.push_back(pred);
                 continue;
             }

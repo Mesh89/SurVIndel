@@ -57,6 +57,8 @@ void categorize(int id, int contig_id, std::string& clip_fname) {
         anchor_t a_clip(bam_is_rev(read) ? anchor_dir : opp_dir(anchor_dir),
                         contig_id, read->core.pos, bam_endpos(read), 1);
 
+        if (bam_is_rev(read)) continue; // since we are not predicting inversions and inverted transpositions
+
         std::ofstream* writer;
         bool anchor_first;
         disc_type_t dt;

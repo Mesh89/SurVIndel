@@ -42,7 +42,6 @@ samFile* get_writer(std::string name, bam_hdr_t* header) {
 
 void categorize(int id, std::string contig, std::string bam_fname, int target_len) {
 
-
     samFile* bam_file = sam_open(bam_fname.c_str(), "r");
     if (bam_file == NULL) {
         throw "Unable to open BAM file.";
@@ -107,9 +106,6 @@ void categorize(int id, std::string contig, std::string bam_fname, int target_le
         bam1_t* read = forward_buffer.front();
         forward_buffer.pop_front();
 
-
-
-        bam_aux_get(read, "MQ");
         int64_t mq = get_mq(read);
         if (read->core.qual < MIN_MAPQ && mq < MIN_MAPQ) continue;
 
@@ -119,10 +115,8 @@ void categorize(int id, std::string contig, std::string bam_fname, int target_le
             if (ok < 0) throw "Failed to write to " + std::string(clip_writer->fn);
         }
 
-
         // we accept one of the mates having mapq 0 only if they are on different chromosomes
-        if ((read->core.qual < MIN_MAPQ || mq < MIN_MAPQ)
-            && !is_dc_pair(read) && !is_mate_unmapped(read)) {
+        if (read->core.qual < MIN_MAPQ || mq < MIN_MAPQ || is_dc_pair(read) || is_mate_unmapped(read)) {
             continue;
         }
 
@@ -141,11 +135,11 @@ void categorize(int id, std::string contig, std::string bam_fname, int target_le
                 pairs[qname] = std::make_pair(bam_dup1(read), DISC_TYPES.OW);
             }
         } else if (read->core.pos < read->core.mpos && read->core.isize > config.max_is
-                   && read->core.mpos-bam_endpos(read) > config.min_is-2*config.read_len) {
+                   && read->core.mpos-bam_endpos(read) > config.min_is-2*config.read_len && is_inward(read, config.min_is)) {
             if (check_SNP(read, two_way_buffer, config.avg_depth)) {
                 pairs[qname] = std::make_pair(bam_dup1(read), DISC_TYPES.LI);
             }
-        } else if (read->core.pos < read->core.mpos && read->core.isize < config.min_is) {
+        } else if (read->core.pos < read->core.mpos && read->core.isize < config.min_is && is_inward(read, config.min_is)) {
             if (check_SNP(read, two_way_buffer, config.avg_depth)) {
                 pairs[qname] = std::make_pair(bam_dup1(read), DISC_TYPES.SI);
             }

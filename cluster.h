@@ -162,12 +162,12 @@ bool operator < (const cc_distance_t& ccd1, const cc_distance_t& ccd2) { // reve
 
 
 struct breakpoint_t {
-    static constexpr const char* pattern = "%c:%d:%d:%d:%d:%d";
+    static constexpr const char* pattern = "%c:%d:%d:%d:%d:%d:%d";
 
     char dir;
     int contig_id, start, end;
     int sc_reads;
-    int spanning_reads = 0;
+    int spanning_pairs = 0, spanning_reads = 0;
 
     breakpoint_t() {}
 
@@ -175,14 +175,16 @@ struct breakpoint_t {
                                     start(anchor.start), end(anchor.end), sc_reads(anchor.sc_reads) {}
 
     breakpoint_t(char* s) {
-        sscanf(s, pattern, &dir, &contig_id, &start, &end, &sc_reads, &spanning_reads);
+        sscanf(s, pattern, &dir, &contig_id, &start, &end, &sc_reads, &spanning_pairs, &spanning_reads);
     }
 
     int pos() { return dir == 'L' ? start : end; }
 
+    int anchor_len() { return end - start; }
+
     std::string to_str() {
-        char buffer[100];
-        sprintf(buffer, pattern, dir, contig_id, start, end, sc_reads, spanning_reads);
+        char buffer[1000];
+        sprintf(buffer, pattern, dir, contig_id, start, end, sc_reads, spanning_pairs, spanning_reads);
         return std::string(buffer);
     }
 };

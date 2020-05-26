@@ -3,8 +3,10 @@
 #include <queue>
 #include <unordered_set>
 #include <numeric>
+#include <random>
 #include <htslib/sam.h>
 #include <htslib/hts.h>
+
 
 #include "config.h"
 #include "cluster.h"
@@ -13,6 +15,7 @@
 
 std::string workdir;
 std::mutex mtx;
+std::mt19937 rng {std::random_device{}()};
 
 config_t config;
 
@@ -56,7 +59,7 @@ int max_size_to_test() {
 bool is_stat_testable(prediction_t* pred) {
     if (pred->sv_type == SV_TYPES.DEL || pred->sv_type == SV_TYPES.DUP || pred->sv_type == SV_TYPES.INS) {
         return pred->len() <= config.max_is + max_size_to_test();
-    } else{
+    } else {
         return false;
     }
 }
@@ -92,7 +95,7 @@ std::vector<double> gen_population_for_dels(std::string bam_fname) {
     std::ifstream rnd_pos_fin(workdir + "/random_pos.txt");
     std::vector<double> population;
     bam1_t* read = bam_init1();
-    while (population.size() < POP_SIZE) {
+    while (population.size() < POP_SIZE*100) {
         char contig[1000]; int pos;
         rnd_pos_fin >> contig >> pos;
         if (pos < 2*config.max_is || pos >= contig_name2len[std::string(contig)]-2*config.max_is) continue;
@@ -105,7 +108,7 @@ std::vector<double> gen_population_for_dels(std::string bam_fname) {
 
             if (is_samechr(read) && !is_samestr(read) && !is_outward(read, config.min_is) &&
                     read->core.isize > 0 && read->core.isize < MAX_READ_IS) {
-                int start = read->core.pos+read->core.l_qseq/2, end = get_mate_endpos(read)+read->core.l_qseq/2;
+                int start = read->core.pos+read->core.l_qseq/2, end = get_mate_endpos(read)-read->core.l_qseq/2;
                 if (start >= end) continue;
 
                 if (start <= pos && pos <= end) {
@@ -117,6 +120,9 @@ std::vector<double> gen_population_for_dels(std::string bam_fname) {
     }
     close_samFile(open_sam);
     bam_destroy1(read);
+
+    std::shuffle(std::begin(population), std::end(population), rng);
+    population.resize(POP_SIZE);
 
     return population;
 }
@@ -153,6 +159,9 @@ std::vector<double> gen_population_for_ins(std::string bam_fname) {
     }
     close_samFile(open_sam);
     bam_destroy1(read);
+
+    std::shuffle(std::begin(population), std::end(population), rng);
+    population.resize(POP_SIZE);
 
     return population;
 }
@@ -290,7 +299,7 @@ void stat_testing(int id, std::string bam_fname, prediction_t* pred) {
     }
     pred->shift_pval = pval;
 
-    double var = variance(sample);
+    double var = variance(sample, sample_mean);
     pred->conf_ival = 1.96*sqrt(var/sample.size());
 }
 
@@ -307,14 +316,17 @@ void find_spanning(breakpoint_t& bp, std::string& bam_fname) {
     hts_itr_t* iter = sam_itr_querys(open_sam->idx, open_sam->header, region);
     bam1_t* read = bam_init1();
     while (sam_itr_next(open_sam->file, iter, read) >= 0) {
-        if (!is_valid(read, false) || bam_is_rev(read)) continue;
+        if (!is_valid(read, false)) continue;
 
-        if (is_samechr(read) && !is_samestr(read) && !is_outward(read, config.min_is) &&
+        if (!bam_is_rev(read) && is_samechr(read) && !is_samestr(read) && !is_outward(read, config.min_is) &&
             read->core.isize >= config.min_is && read->core.isize <= config.max_is) {
             if ((bp.dir == 'R' && bp.pos() >= read->core.pos && bp.pos() < read->core.mpos) ||
                 (bp.dir == 'L' && bp.pos() > bam_endpos(read) && bp.pos() <= get_mate_endpos(read))) {
-                bp.spanning_reads++;
+                bp.spanning_pairs++;
             }
+        }
+        if (read->core.pos+10 < bp.pos() && bp.pos() < bam_endpos(read)-10) {
+            bp.spanning_reads++;
         }
     }
 
@@ -400,8 +412,10 @@ int main(int argc, char* argv[]) {
     std::vector<std::future<void> > futures;
     for (prediction_t* pred : preds) {
         if (is_stat_testable(pred)) {
-            std::future<void> future = thread_pool.push(stat_testing, bam_fname, pred);
-            futures.push_back(std::move(future));
+            std::future<void> future1 = thread_pool.push(stat_testing, bam_fname, pred);
+            futures.push_back(std::move(future1));
+            std::future<void> future2 = thread_pool.push(odds_ratio, bam_fname, pred);
+            futures.push_back(std::move(future2));
         } else {
             std::future<void> future = thread_pool.push(odds_ratio, bam_fname, pred);
             futures.push_back(std::move(future));

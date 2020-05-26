@@ -66,6 +66,10 @@ bool is_outward(bam1_t* r, int min_is) {
     }
 }
 
+bool is_inward(bam1_t* r, int min_is) {
+    return !is_dc_pair(r) && !is_samestr(r) && !is_outward(r, min_is);
+}
+
 // r must be to the left of mate
 bool is_overlaps_with_mate(bam1_t* r) {
     return r->core.mpos < bam_endpos(r);

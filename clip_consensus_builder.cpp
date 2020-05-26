@@ -348,10 +348,11 @@ void build_clip_consensuses(int id, int contig_id) {
     StripedSmithWaterman::Aligner harsh_aligner(2,5,100,1,false);
     for (auto& e : rc_anchors_by_lc_anchor) {
         consensus_t* lc_anchor = e.first,* rc_anchor = e.second;
+
         StripedSmithWaterman::Alignment alignment;
         int mask_len = rc_anchor->consensus.size()/2;
         if (mask_len < 15) mask_len = 15; // suppress warning
-        aligner.Align(rc_anchor->consensus.data(), lc_anchor->consensus.data(), lc_anchor->consensus.length(), filter,
+        harsh_aligner.Align(rc_anchor->consensus.data(), lc_anchor->consensus.data(), lc_anchor->consensus.length(), filter,
                       &alignment, mask_len);
 
         if ((alignment.query_begin > CLIP_ALIGN_END_TOLERANCE && alignment.ref_begin > CLIP_ALIGN_END_TOLERANCE) ||
@@ -393,7 +394,6 @@ void build_clip_consensuses(int id, int contig_id) {
 
             if (l_pos-50 < 0 || r_pos+50 >= chrs[contig_id2name[contig_id]].second) continue;
 
-            // TODO: write cluster
             anchor_t a1('R', contig_id, l_pos-50, l_pos, l_anchor->sc_reads);
             anchor_t a2('L', contig_id, r_pos, r_pos+50, r_anchor->sc_reads);
 
