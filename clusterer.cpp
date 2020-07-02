@@ -162,9 +162,11 @@ void clusterize(int id, int contig_id, int contig2_id, disc_type_t dt, std::stri
             clusters_map.insert(std::make_pair(new_cluster->a1.start, new_cluster));
         }
 
-        for (auto it = clusters_map.begin(); it != clusters_map.end(); it++) {
+        for (auto it = clusters_map.begin(); it != clusters_map.end(); ) {
             if (it->second->dead) {
-                clusters_map.erase(it);
+                it = clusters_map.erase(it);
+            } else {
+                it++;
             }
         }
     }
