@@ -75,8 +75,3 @@ Where alpha-value is the maximum p-value for an indel to be accepted, score-cuto
 is the simple-repeats file.
 The recommended values are 0.01 for alpha-value and 0.33 for score-cutoff. Larger alpha-values and lower score-cutoffs will yield more predictions, but at the expense of precision. 
 
-## Notes
-
-SurVIndel is a very young software, and it has only been used by its authours on a handful of datasets. 
-If you should encounter problems, please write to e0011356@u.nus.edu ; we will do our best to both improve/fix both the software and the documentation.
-
