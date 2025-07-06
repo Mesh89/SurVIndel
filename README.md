@@ -1,5 +1,7 @@
 # SurVIndel
 
+**This software is outdated. Please use SurVIndel2 [https://github.com/kensung-lab/SurVIndel2].**
+
 ## Compiling
 
 To be compiled, SurVIndel requires g++ 4.7.2.
